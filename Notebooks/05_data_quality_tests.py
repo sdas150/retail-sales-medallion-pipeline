@@ -1,0 +1,22 @@
+from pyspark.sql import functions as F
+bronze=spark.table("workspace.bronze_retail.sales_csv")
+silver=spark.table("workspace.silver_retail.sales_clean")
+quarantine=spark.table("workspace.silver_retail.sales_quarantine")
+checks=[]
+def check(name, actual, expected): checks.append((name,actual,expected,"PASS" if actual==expected else "FAIL"))
+check("Bronze count",bronze.count(),30)
+check("After dedup",bronze.dropDuplicates().count(),29)
+check("Silver count",silver.count(),22)
+check("Quarantine count",quarantine.count(),7)
+check("Unique orders",silver.select("order_id").distinct().count(),22)
+check("Missing customers",silver.filter(F.col("customer_id").isNull() | (F.trim("customer_id")=="")).count(),0)
+check("Missing products",silver.filter(F.col("product").isNull() | (F.trim("product")=="")).count(),0)
+check("Invalid quantity",silver.filter(F.col("quantity")<=0).count(),0)
+check("Invalid price",silver.filter(F.col("unit_price")<=0).count(),0)
+check("Invalid dates",silver.filter(F.col("order_date").isNull()).count(),0)
+check("Reconciliation",silver.count()+quarantine.count()+(bronze.count()-bronze.dropDuplicates().count()),30)
+result_df=spark.createDataFrame(checks,["test_name","actual","expected","status"])
+display(result_df)
+failed=[x for x in checks if x[3]=="FAIL"]
+if failed: raise AssertionError(f"Data quality tests failed: {failed}")
+print("All data quality tests passed.")
